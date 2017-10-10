@@ -78,24 +78,45 @@ limitations under the License.
          * Dispatches action by invoking the method with the name that matches
          * action type (`detail.type`) passing detail object as a parameter;
          * also selects all children action dispatchers in the element's DOM tree and
-         * invokes dispatchAction method on them. False returned by an action dispatcher method
-         * results in dispatchAction method returning false (which in turn stops further processing
-         * of the action by other action dispatchers).
+         * invokes dispatchAction method on them in a Promise chain.
+         * An action dispatcher method can return a `Promise` to ensure that
+         * subsequent processing of the action will be invoked only after the
+         * `Promise` is resolved. If an action dispatcher method returns a `false`,
+         * `Promise.resolve(false)`, or `Promise.reject(false)`, no further
+         * processing of the action will be done by other action dispatchers.
          *
          * @param {{type: string}} detail
-         * @return {boolean}
+         * @return {Promise}
          */
         dispatchAction(detail) {
+          // wrap and return a Promise
           if (this[detail.type] && typeof this[detail.type] === 'function') {
-            if (this[detail.type](detail) === false) {
-              return false;
-            }
+            return Promise.resolve(this[detail.type](detail));
           }
+
           //dispatch action on nested dispatchers
           var nodes = this.root ? this.root.querySelectorAll('[action-dispatcher]') : [];
-          return Array.prototype.every.call(nodes,
-              (element) => element.dispatchAction(detail) !== false);
+
+          // chained promises
+          if (nodes.length > 0) {
+            // wrap as a Promise
+            let chain = Promise.resolve(nodes[0].dispatchAction(detail));
+            for (let i=1, len=nodes.length; i<len; ++i) {
+              chain = chain.then(next => {
+                if (next === false) {
+                  return Promise.reject(false);
+                }
+                return nodes[i].dispatchAction(detail);
+              });
+            }
+            return chain.catch(error => {
+              // only throw a real error instead of reject-false
+              if (error) throw error;
+            });
+          }
         }
+
+
 
       });
 </script>
